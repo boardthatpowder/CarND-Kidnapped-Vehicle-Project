@@ -56,7 +56,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   }
   
   // mark as initialized
-	is_initialized=true;
+  is_initialized=true;
 
 }
 
@@ -90,9 +90,9 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
     normal_distribution<double> dist_x(p.x, std_pos[0]);
     normal_distribution<double> dist_y(p.y, std_pos[1]);
     normal_distribution<double> dist_theta(p.theta, std_pos[2]);
-    p.x+=dist_x(gen);
-    p.y+=dist_y(gen);
-    p.theta+=dist_theta(gen);
+    p.x=dist_x(gen);
+    p.y=dist_y(gen);
+    p.theta=dist_theta(gen);
     
   }
 }
@@ -108,16 +108,14 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    *   during the updateWeights phase.
    */
   
-  for (auto &p: predicted) {
-    double shortest_distance = numeric_limits<double>::max();
-  	for (unsigned int i=0; i<observations.size(); i++) {
-    	// Find the predicted measurement that is closest to each  observed measurement 
-      	// by calculating the Euclidean distance
-      	double distance = dist(p.x, p.y, observations[i].x, observations[i].y);
-      	if (distance<shortest_distance) {
-          shortest_distance=distance;
-          p.id=i;
-        }
+  for (auto &o: observations) {
+     double shortest_distance = numeric_limits<double>::max();
+    for (unsigned i=0; i<predicted.size(); i++) {
+      double distance = dist(predicted[i].x, predicted[i].y, o.x, o.y);
+      if (distance<shortest_distance) {
+        shortest_distance=distance;
+        o.id=i;
+      }
     }
   }
 }
@@ -142,31 +140,32 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
   
   for (unsigned int i=0; i<particles.size(); ++i) {
     
-    auto p = particles[i];
+    auto &p = particles[i];
     
     // we're only interested in map landmarks that are within sensor range, therefore ignore the rest
   	std::vector<LandmarkObs> landmarksInRange;
     for (auto &lm: map_landmarks.landmark_list) {
       if (dist(p.x, p.y, lm.x_f, lm.y_f) <= sensor_range) {
         // only include these...
-		landmarksInRange.push_back({-1, lm.x_f, lm.y_f});
+		landmarksInRange.push_back({lm.id_i, lm.x_f, lm.y_f});
       }
     }
     
-    // transform car sensor landmark observations from car coordinate system to vehicle coordinate system
+    // transform car sensor landmark observations from vehicle coordinate system to map coordinate system
     vector<LandmarkObs> transformedObservations;
   	for (auto &o: observations) {
       LandmarkObs transformed;
-      transformed.x= cos(p.theta*o.x) - sin(p.theta*o.y) + p.x;
-      transformed.y= sin(p.theta*o.x) + cos(p.theta*o.y) + p.y;
+      transformed.id = o.id;
+      transformed.x= (cos(p.theta)*o.x) - (sin(p.theta)*o.y) + p.x;
+      transformed.y= (sin(p.theta)*o.x) + (cos(p.theta)*o.y) + p.y;
       transformedObservations.push_back(transformed);
     }
                                         
 	// associate transformed observations with nearest landmarks (within sensor range) on map
-	dataAssociation(landmarksInRange, transformedObservations);
+	dataAssociation(transformedObservations, landmarksInRange);
     
     // update particle weights by applying Gaussian probability density function for each measurement
-    double product_p_x_y=1;
+    double total_weight=1.0;
   	for (auto &lm: landmarksInRange) {
       auto associated=transformedObservations[lm.id];
       double x=associated.x;
@@ -176,14 +175,13 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
       double mu_x=lm.x;
       double mu_y=lm.y;
       
-      double a = 1 / (2 * M_PI * sigma_x * sigma_y);
-      double b = pow(x - mu_x, 2) / (2 * pow(sigma_x,2));
-      double c = pow(y - mu_y, 2) / (2 * pow(sigma_x,2));
-      double p_x_y = a * exp(-(b+c));
-      
-      product_p_x_y*=p_x_y;
+      double gauss_norm = 1 / (2 * M_PI * sigma_x * sigma_y);
+      double exponent = (pow(x - mu_x, 2) / (2 * pow(sigma_x, 2)))
+               + (pow(y - mu_y, 2) / (2 * pow(sigma_y, 2)));
+      double weight = gauss_norm * exp(-exponent);
+      total_weight*=weight;
     }
-    p.weight=product_p_x_y;
+    p.weight=total_weight;
 	weights[i]=p.weight;
   }
 }
